@@ -21,6 +21,8 @@ class LibLinearTest extends FunSuite with SharedSparkContext {
   val largeTestData_NumNeg = largeTestData.filter { p => p.label != 1.0 }.length
 
   test("util function takeFractions") {
+    testTakeFractions();
+    def testTakeFractions(){
     val origList = (1 to 50).toList
 
     // equal partitions:
@@ -40,6 +42,8 @@ class LibLinearTest extends FunSuite with SharedSparkContext {
     assert(unequalLists(1).size == 15)
     assert(unequalLists(2).size == 25)
     assert(unequalLists(3).size == 5)
+    assert(origList.intersect(unequalLists.flatten.toSeq).length==origList.length,
+        "The same numbers should be in the output as in the input");
 
     // when fractions is not perfectly divisible 
     val dontAddUp = LIBLINEAR.takeFractions(origList, Array(100, 100, 100))
@@ -48,7 +52,7 @@ class LibLinearTest extends FunSuite with SharedSparkContext {
       "When fractions are not perfectly dividing the input-list, should not be a problem")
 
     //corner-case: 0 or 1 fraction specified 
-    val smallList = (1 to 5).toList
+    val smallList = (1 to 10).toList
     val outSmall = LIBLINEAR.takeFractions(smallList, Array())
     assert(!outSmall(0).equals(smallList),
       "In cornercase (0 or 1 fractions given), the output should be randomized")
@@ -73,9 +77,12 @@ class LibLinearTest extends FunSuite with SharedSparkContext {
     intercept[IllegalArgumentException] {
       LIBLINEAR.takeFractions(List(), Array(0, 0))
     }
+    }
   }
 
   test("util function takeAbsolute") {
+    testTakeAbsoulte();
+    def testTakeAbsoulte(){
     val lists = LIBLINEAR.takeAbsolute((1 to 5).toList, Array(1, 1))
     assert(lists.length == 3,
       "The number of output lists should be correct" +
@@ -103,9 +110,12 @@ class LibLinearTest extends FunSuite with SharedSparkContext {
     intercept[IllegalArgumentException] {
       LIBLINEAR.takeAbsolute(List(), Array(1))
     }
+    }
   }
 
   test("trainAggregatedClassifier") {
+    testTrainAggregatedClassifier();
+    def testTrainAggregatedClassifier() {
     val (test, training) = LIBLINEAR.takeFractionBinaryStratisfied(largeTestData, 0.2)
     val rddTraining = sc.parallelize(training)
     val aggr = LIBLINEAR.trainAggregatedClassifier(rddTraining)
@@ -116,6 +126,7 @@ class LibLinearTest extends FunSuite with SharedSparkContext {
 
     test.foreach { lp =>
       aggr.mondrianPv(lp.features)
+    }
     }
   }
 
@@ -162,37 +173,51 @@ class LibLinearTest extends FunSuite with SharedSparkContext {
   }
 
   test("takeFractionBinaryStratisfied") {
+    testTakeFractionBinaryStratisfied();
+    def testTakeFractionBinaryStratisfied(){
+      val frac = 0.2
+      val (calib, propTrain) = LIBLINEAR.takeFractionBinaryStratisfied(largeTestData, frac)
+      val posCalib = calib.filter { lp => lp.label == 1.0 }.length
+      val negCalib = calib.filter { lp => lp.label != 1.0 }.length
+      
+      //make sure that the correct data is in the correct partitions etc
+      val allExamples = calib ++ propTrain;
+      assert(largeTestData.intersect(allExamples).length==largeTestData.length,
+          "All examples should still be there");
+      
+      assert(math.abs(posCalib - frac * largeTestData_NumPos) < 2,
+        "The number of positive calibration datapoints should be correct")
 
-    val frac = 0.2
-    val (calib, propTrain) = LIBLINEAR.takeFractionBinaryStratisfied(largeTestData, frac)
-    val posCalib = calib.filter { lp => lp.label == 1.0 }.length
-    val negCalib = calib.filter { lp => lp.label != 1.0 }.length
+      assert(math.abs(negCalib - frac * largeTestData_NumNeg) < 2,
+        "The number of negative calibration datapoints should be correct")
 
-    assert(math.abs(posCalib - frac * largeTestData_NumPos) < 2,
-      "The number of positive calibration datapoints should be correct")
+      assert(calib.length + propTrain.length == largeTestData_num,
+        "The total number of records should not be changed")
 
-    assert(math.abs(negCalib - frac * largeTestData_NumNeg) < 2,
-      "The number of negative calibration datapoints should be correct")
-
-    assert(calib.length + propTrain.length == largeTestData_num,
-      "The total number of records should not be changed")
-
-    // if the calibrationFraction is set to be larger than 1
-    intercept[IllegalArgumentException] {
-      LIBLINEAR.takeFractionBinaryStratisfied(smallTestData, 1.1)
+      // if the calibrationFraction is set to be larger than 1
+      intercept[IllegalArgumentException] {
+        LIBLINEAR.takeFractionBinaryStratisfied(smallTestData, 1.1)
+      }
+      // if the calibrationFraction is set to be smaller than the 0
+      intercept[IllegalArgumentException] {
+        LIBLINEAR.takeFractionBinaryStratisfied(smallTestData, -1)
+      }
     }
-    // if the calibrationFraction is set to be smaller than the 0
-    intercept[IllegalArgumentException] {
-      LIBLINEAR.takeFractionBinaryStratisfied(smallTestData, -1)
-    }
-
+    
   }
 
   test("takeAbsoluteBinaryStratisfied") {
+    testTakeAbsoluteBinaryStratisfied();
+    def testTakeAbsoluteBinaryStratisfied(){
     val numCalib = 10
     val (calib, propTrain) = LIBLINEAR.takeAbsoluteBinaryStratisfied(largeTestData, numCalib)
     val posCalib = calib.filter { lp => lp.label == 1.0 }.length
     val negCalib = calib.filter { lp => lp.label != 1.0 }.length
+    
+    //Make sure that all examples are still left
+    val allExamples = calib ++ propTrain;
+    assert(largeTestData.intersect(allExamples).length == largeTestData.length,
+        "All examples should still be in calib and propTraining datasets");
 
     assert(posCalib == numCalib,
       "The number of positive calibration samples should be correct")
@@ -204,6 +229,7 @@ class LibLinearTest extends FunSuite with SharedSparkContext {
     // if the calibrationSize is set to be larger than the array-size
     intercept[IllegalArgumentException] {
       LIBLINEAR.takeAbsoluteBinaryStratisfied(smallTestData, 20)
+    }
     }
   }
 }
